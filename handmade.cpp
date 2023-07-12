@@ -20,28 +20,26 @@ internal void GameOutputSound(game_sound_output_buffer* SoundBuffer, int ToneHz)
     }
 }
 
-internal void RenderWeirdGradient(game_offscreen_buffer *Buffer, int BlueOffset, int GreenOffset)
+internal void RenderWeirdGradeint(game_offscreen_buffer *Buffer, int XOffset, int YOffset) 
 {
-    uint8 *Row = (uint8*)Buffer->Memory;
+    uint8 *Row = (uint8 *)Buffer->Memory;
     
-    for(int Y = 0; Y < Buffer->Height; ++Y)
-    {
-        uint32 *Pixel = (uint32*)Row;
+    for(int Y = 0; Y < Buffer->Height; Y++) {
+        uint32 *Pixel = (uint32 *)Row;
         
-        for(int X = 0; X < Buffer->Width; ++X)
-        {
-            uint8 Blue = (X + BlueOffset);
-            uint8 Green = (Y + GreenOffset);
-            
-            *Pixel++ = ((Green << 8) | Blue);
+        for(int X = 0; X < Buffer->Width; X++) {
+            uint8 Blue = X + XOffset;
+            uint8 Green = Y + YOffset;
+            // 0xXXRRGGBB
+            *Pixel++ = (Green << 8) | Blue;
         }
-        
-        Row += Buffer->Pitch;
+        Row = Row + Buffer->Width * Buffer->BytesPerPixel;
     }
 }
 
-internal void GameUpdateAndRender(game_offscreen_buffer *Buffer, game_sound_output_buffer *SoundBuffer, int BlueOffset, int GreenOffset, int ToneHz)
+
+internal void GameUpdateAndRender(game_offscreen_buffer* Buffer, int XOffset, int YOffset, game_sound_output_buffer* SoundBuffer, int ToneHz)
 {
     GameOutputSound(SoundBuffer, ToneHz);
-    RenderWeirdGradient(Buffer, BlueOffset, GreenOffset);
+    RenderWeirdGradeint(Buffer, XOffset, YOffset);
 }

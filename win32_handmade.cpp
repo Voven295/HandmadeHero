@@ -20,11 +20,11 @@
 #include <math.h>
 #include <stdint.h>
 
-#define internal static;
-#define local_persist static;
-#define global_variable static;
+#define Pi32 3.14159265359
 
-#define Pi32 3.14159265359f
+#define local_persist static
+#define global_variable static
+#define internal static
 
 typedef uint8_t uint8;
 typedef uint32_t uint32;
@@ -40,30 +40,41 @@ typedef int32 bool32;
 typedef float real32;
 typedef double real64;
 
+#include "handmade.cpp"
+
 #include <windows.h>
-#include <stdio.h>
 #include <xinput.h>
 #include <dsound.h>
-
-#include "handmade.cpp"
 
 struct win32_offscreen_buffer
 {
     BITMAPINFO Info;
-    void *Memory;
+    void* Memory;
     int Width;
     int Height;
     int Pitch;
 };
 
-global_variable bool32 GlobalRunning;
+global_variable LPDIRECTSOUNDBUFFER GlobalSoundBuffer;
 global_variable win32_offscreen_buffer GlobalBackBuffer;
-global_variable LPDIRECTSOUNDBUFFER GlobalSecondaryBuffer;
+global_variable bool32 GlobalRunning;
 
-struct win32_window_dimension
-{
+struct win32_window_dimension {
     int Width;
     int Height;
+};
+
+struct win32_sound_output
+{
+    int32 SamplesPerSecond;
+    int ToneHz;
+    int16 ToneVolume;
+    uint32 RunningSampleIndex;
+    int WavePeriod;
+    int BytesPerSample;
+    int SecondaryBufferSize;
+    int LatencySampleCount;
+    real32 tSine;
 };
 
 // NOTE(casey): XInputGetState
@@ -71,12 +82,12 @@ struct win32_window_dimension
 
 typedef X_INPUT_GET_STATE(x_input_get_state);
 
-X_INPUT_GET_STATE(XInputGetStateStub) 
-{ 
-    return (ERROR_DEVICE_NOT_CONNECTED); 
+X_INPUT_GET_STATE(XInputGetStateStub)
+{
+    return (ERROR_DEVICE_NOT_CONNECTED);
 }
 
-global_variable x_input_get_state *XInputGetState_ = XInputGetStateStub;
+global_variable x_input_get_state* XInputGetState_ = XInputGetStateStub;
 
 #define XInputGetState XInputGetState_
 
@@ -85,16 +96,14 @@ global_variable x_input_get_state *XInputGetState_ = XInputGetStateStub;
 
 typedef X_INPUT_SET_STATE(x_input_set_state);
 
-X_INPUT_SET_STATE(XInputSetStateStub) 
-{  
-    return (ERROR_DEVICE_NOT_CONNECTED); 
+X_INPUT_SET_STATE(XInputSetStateStub)
+{
+    return (ERROR_DEVICE_NOT_CONNECTED);
 }
 
-global_variable x_input_set_state *XInputSetState_ = XInputSetStateStub;
+global_variable x_input_set_state* XInputSetState_ = XInputSetStateStub;
 
 // NOTE(voven): direct sound.
-#define XInputSetState XInputSetState_
-
 #define DIRECT_SOUND_CREATE(name) HRESULT WINAPI name(LPCGUID pcGuidDevice, LPDIRECTSOUND *ppDS, LPUNKNOWN pUnkOuter);
 typedef DIRECT_SOUND_CREATE(direct_sound_create);
 
@@ -114,135 +123,200 @@ internal void Win32LoadXInput(void)
     
     if (XInputLibrary)
     {
-        XInputGetState = (x_input_get_state*)GetProcAddress(XInputLibrary, "XInputGetState");
-        XInputSetState = (x_input_set_state*)GetProcAddress(XInputLibrary, "XInputSetState");
+        XInputGetState_ = (x_input_get_state*)GetProcAddress(XInputLibrary, "XInputGetState");
+        XInputSetState_ = (x_input_set_state*)GetProcAddress(XInputLibrary, "XInputSetState");
     }
 }
 
-internal win32_window_dimension Win32GetWindowDimension(HWND Window)
-{
-    win32_window_dimension Result;
-    
-    RECT ClientRect;
-    GetClientRect(Window, &ClientRect);
-    Result.Width = ClientRect.right - ClientRect.left;
-    Result.Height = ClientRect.bottom - ClientRect.top;
-    
-    return(Result);
-}
-
-internal void Win32InitDirectSound(HWND Window, int32 SamplesPerSecond, int32 BufferSize)
-{
-    HMODULE DirectSoundLibrary = LoadLibraryA("dsound.dll");
-    if (DirectSoundLibrary)
-    {
-        direct_sound_create *DirectSoundCreate = (direct_sound_create*)
-            GetProcAddress(DirectSoundLibrary, "DirectSoundCreate");
+internal void
+Win32InitDSound(HWND Window, int32 SamplesPerSecond, int32 BufferSize) {
+    HMODULE Library = LoadLibraryA("dsound.dll");
+    if(Library) {
+        direct_sound_create *DirectSoundCreate = (direct_sound_create *)GetProcAddress(Library, "DirectSoundCreate");
         
         LPDIRECTSOUND DirectSound;
-        if (DirectSoundCreate && SUCCEEDED(DirectSoundCreate(0, &DirectSound, 0)))
-        {
-            WAVEFORMATEX WaveFormat = {};
+        
+        if(SUCCEEDED(DirectSoundCreate(0, &DirectSound, 0))) {
+            if(SUCCEEDED(DirectSound->SetCooperativeLevel(Window, DSSCL_PRIORITY))) {
+                OutputDebugStringA("Set cooperative level ok\n");
+            } else {
+                // TODO: logging
+            }
+            
+            WAVEFORMATEX WaveFormat  = {};
             WaveFormat.wFormatTag = WAVE_FORMAT_PCM;
             WaveFormat.nChannels = 2;
             WaveFormat.nSamplesPerSec = SamplesPerSecond;
             WaveFormat.wBitsPerSample = 16;
-            WaveFormat.nBlockAlign = (WaveFormat.nChannels * WaveFormat.wBitsPerSample) / 8;
+            WaveFormat.nBlockAlign = WaveFormat.nChannels * WaveFormat.wBitsPerSample / 8;
             WaveFormat.nAvgBytesPerSec = WaveFormat.nSamplesPerSec * WaveFormat.nBlockAlign;
-            WaveFormat.cbSize = 0;
             
-            if (SUCCEEDED(DirectSound->SetCooperativeLevel(Window, DSSCL_PRIORITY)))
             {
-                DSBUFFERDESC BufferDescription = {};
-                BufferDescription.dwSize = sizeof(BufferDescription);
-                BufferDescription.dwFlags = DSBCAPS_PRIMARYBUFFER;
-                
-                LPDIRECTSOUNDBUFFER PrimaryBuffer;
-                // NOTE(voven): first buffer need only for set WaveFormat in our soundcard
-                if (SUCCEEDED(DirectSound->CreateSoundBuffer(&BufferDescription, &PrimaryBuffer, 0)))
-                {
-                    
-                    if (SUCCEEDED(PrimaryBuffer->SetFormat(&WaveFormat)))
-                    {
+                DSBUFFERDESC BufferDesc = {};
+                BufferDesc.dwSize = sizeof(BufferDesc);
+                BufferDesc.dwFlags = DSBCAPS_PRIMARYBUFFER;
+                LPDIRECTSOUNDBUFFER  PrimaryBuffer;
+                if(SUCCEEDED(DirectSound->CreateSoundBuffer(&BufferDesc, &PrimaryBuffer, 0))) {
+                    OutputDebugStringA("Create primary buffer ok\n");
+                    if(SUCCEEDED(PrimaryBuffer->SetFormat(&WaveFormat))) {
+                        OutputDebugStringA("Primary buffer set format ok\n");
+                    } else {
+                        // TODO: logging
                     }
                 }
             }
             
-            // NOTE(voven): secondarybuffer represents the final buffer with which we will interact in the     // NOTE(voven): future to play the sound
-            DSBUFFERDESC BufferDescription = {};
-            BufferDescription.dwSize = sizeof(BufferDescription);
-            BufferDescription.dwFlags = 0;
-            BufferDescription.dwBufferBytes = BufferSize;
-            BufferDescription.lpwfxFormat = &WaveFormat;
-            
-            if (SUCCEEDED(DirectSound->CreateSoundBuffer(&BufferDescription, &GlobalSecondaryBuffer, 0)))
             {
-                
+                DSBUFFERDESC BufferDesc = {};
+                BufferDesc.dwSize = sizeof(BufferDesc);
+                BufferDesc.dwFlags = 0;
+                BufferDesc.dwBufferBytes = BufferSize;
+                BufferDesc.lpwfxFormat = &WaveFormat;
+                if(SUCCEEDED(DirectSound->CreateSoundBuffer(&BufferDesc, &GlobalSoundBuffer, 0))) {
+                    OutputDebugStringA("Secondary buffer created\n");
+                } else {
+                    // TODO: logging
+                }
             }
+            
+        } else {
+            // TODO: logging
         }
+    } else {
+        // TODO: logging
+    }
+}
+
+internal void Win32ClearSoundBuffer(win32_sound_output *SoundOutput)
+{
+    void *Region1;
+    DWORD Region1Size;
+    void *Region2;
+    DWORD Region2Size;
+    
+    if(SUCCEEDED(GlobalSoundBuffer->Lock(0, SoundOutput->SecondaryBufferSize,
+                                         &Region1, &Region1Size,
+                                         &Region2, &Region2Size,
+                                         0))) 
+    {
+        uint8 *DestSample = (uint8*)Region1;
+        
+        for(DWORD ByteIndex = 0; ByteIndex < Region1Size; ++ByteIndex) {
+            *DestSample++ = 0;
+        }
+        
+        DestSample = (uint8*)Region2;
+        
+        for(DWORD ByteIndex = 0; ByteIndex < Region2Size; ++ByteIndex) {
+            *DestSample++ = 0;
+        }
+        
+        GlobalSoundBuffer->Unlock(Region1, Region1Size, Region2, Region2Size);
+    }
+}
+
+internal void
+Win32FillSoundBuffer(win32_sound_output *SoundOutput, DWORD LockOffset, DWORD BytesToLock, game_sound_output_buffer *SourceBuffer) {
+    void *Region1;
+    DWORD Region1Size;
+    void *Region2;
+    DWORD Region2Size;
+    
+    if(SUCCEEDED(GlobalSoundBuffer->Lock(LockOffset,
+                                         BytesToLock,
+                                         &Region1, &Region1Size,
+                                         &Region2, &Region2Size,
+                                         0))) 
+    {
+        DWORD Region1SampleCount = Region1Size / SoundOutput->BytesPerSample;
+        
+        int16 *DestSample = (int16 *)Region1;
+        int16 *SourceSample = SourceBuffer->Samples;
+        
+        for(int i = 0; i < Region1SampleCount; i++) {
+            *DestSample++ = *SourceSample++;
+            *DestSample++ = *SourceSample++;
+            SoundOutput->RunningSampleIndex++;
+        }
+        
+        
+        DWORD Region2SampleCount = Region2Size / SoundOutput->BytesPerSample;
+        DestSample = (int16 *)Region2;
+        for(int i = 0; i < Region2SampleCount; i++) {
+            *DestSample++ = *SourceSample++;
+            *DestSample++ = *SourceSample++;
+            SoundOutput->RunningSampleIndex++;
+        }
+        
+        GlobalSoundBuffer->Unlock(Region1, Region1Size, Region2, Region2Size);
     }
 }
 
 
-internal void Win32DisplayBufferInWindow(win32_offscreen_buffer *Buffer, HDC DeviceContext, int WindowWidth, int WindowHeight)
-{
-    StretchDIBits(DeviceContext,/*
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          X, Y, Width, Height,
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          X, Y, Width, Height,
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      */
-                  0, 0, WindowWidth, WindowHeight,
-                  0, 0, Buffer->Width, Buffer->Height,
-                  Buffer->Memory,
-                  &Buffer->Info,
-                  DIB_RGB_COLORS,
-                  SRCCOPY);
+internal win32_window_dimension
+Win32GetWindowDimension(HWND Window) {
+    win32_window_dimension Result;
+    RECT ClientRect;
+    GetClientRect(Window, &ClientRect);
+    Result.Width = ClientRect.right - ClientRect.left;
+    Result.Height = ClientRect.bottom - ClientRect.top;
+    return Result;
 }
 
-internal void Win32ResizeDIBSection(win32_offscreen_buffer *Buffer, int Width, int Height)
+internal void Win32ResizeDIBSection(win32_offscreen_buffer *Buffer, int Width, int Height) 
 {
-    if (Buffer->Memory)
+    if(Buffer->Memory)
     {
         VirtualFree(Buffer->Memory, 0, MEM_RELEASE);
     }
     
     Buffer->Width = Width;
     Buffer->Height = Height;
-    int BytesPerPixel = 4;
+    Buffer->Pitch = 4;
     
     Buffer->Info.bmiHeader.biSize = sizeof(Buffer->Info.bmiHeader);
     Buffer->Info.bmiHeader.biWidth = Buffer->Width;
     Buffer->Info.bmiHeader.biHeight = -Buffer->Height;
     Buffer->Info.bmiHeader.biPlanes = 1;
-    Buffer->Info.bmiHeader.biBitCount = 32;
-    Buffer->Info.bmiHeader.biCompression = BI_RGB; 
+    Buffer->Info.bmiHeader.biBitCount = Buffer->Pitch * 8;
+    Buffer->Info.bmiHeader.biCompression = BI_RGB;
     
-    int BitmapMemorySize  = (Buffer->Width * Buffer->Height) * BytesPerPixel;
-    Buffer->Memory = VirtualAlloc(0, BitmapMemorySize, MEM_RESERVE|MEM_COMMIT, PAGE_READWRITE);
+    int BitmapSize = Buffer->Width * Buffer->Height * Buffer->Pitch;
     
-    uint8 *Row = (uint8*)Buffer->Memory;
-    
-    Buffer->Pitch = Width * BytesPerPixel;
+    Buffer->Memory = VirtualAlloc(0, BitmapSize, MEM_COMMIT|MEM_RESERVE, PAGE_READWRITE);
 }
 
-LRESULT CALLBACK Win32WindowProc(HWND Window,UINT Message,WPARAM WParam,
+internal void Win32DisplayBufferInWindow(win32_offscreen_buffer* Buffer, HDC DeviceContext, 
+                                         int WindowWidth, int WindowHeight)
+{
+    StretchDIBits(DeviceContext,
+                  0, 0, WindowWidth, WindowHeight, 
+                  0, 0, Buffer->Width, Buffer->Height, 
+                  Buffer->Memory,
+                  &Buffer->Info,
+                  DIB_RGB_COLORS,
+                  SRCCOPY);
+}
+
+LRESULT CALLBACK Win32WindowProc(HWND Window, UINT Message, WPARAM WParam,
                                  LPARAM LParam)
 {
     //LRESULT is 64 bit long
     LRESULT Result = 0;
     
-    switch(Message){
-        case WM_SIZE:{
+    switch (Message) {
+        case WM_SIZE: {
             
         }break;
         
-        case WM_DESTROY:{
+        case WM_DESTROY: {
             GlobalRunning = false;
         }break;
         
-        case WM_CLOSE:{
+        case WM_CLOSE: {
             GlobalRunning = false;
         }break;
-        case WM_ACTIVATEAPP:{
+        case WM_ACTIVATEAPP: {
             OutputDebugStringA("WM_ACTIVATEAPP\n");
         }break;
         
@@ -257,27 +331,27 @@ LRESULT CALLBACK Win32WindowProc(HWND Window,UINT Message,WPARAM WParam,
             
             if (IsDown != WasDown)
             {
-                if(VKCode == 'E' || VKCode == VK_UP)
+                if (VKCode == 'E' || VKCode == VK_UP)
                 {
                     OutputDebugStringA("E\n");
                 }
-                else if(VKCode == 'S' || VKCode == VK_LEFT)
+                else if (VKCode == 'S' || VKCode == VK_LEFT)
                 {
                     OutputDebugStringA("S\n");
                 }
-                else if(VKCode == 'D' || VKCode == VK_DOWN)
+                else if (VKCode == 'D' || VKCode == VK_DOWN)
                 {
                     OutputDebugStringA("D\n");
                 }
-                else if(VKCode == 'F' || VKCode == VK_RIGHT)
+                else if (VKCode == 'F' || VKCode == VK_RIGHT)
                 {
                     OutputDebugStringA("F\n");
                 }
-                else if(VKCode == 'W')
+                else if (VKCode == 'W')
                 {
                     OutputDebugStringA("W\n");
                 }
-                else if(VKCode == 'R')
+                else if (VKCode == 'R')
                 {
                     OutputDebugStringA("R\n");
                 }
@@ -294,7 +368,7 @@ LRESULT CALLBACK Win32WindowProc(HWND Window,UINT Message,WPARAM WParam,
                     }
                     OutputDebugStringA("\n");
                 }
-                else if(VKCode == VK_SPACE)
+                else if (VKCode == VK_SPACE)
                 {
                     OutputDebugStringA("SPACE\n");
                 }
@@ -319,10 +393,10 @@ LRESULT CALLBACK Win32WindowProc(HWND Window,UINT Message,WPARAM WParam,
             
             win32_window_dimension Dimension = Win32GetWindowDimension(Window);
             Win32DisplayBufferInWindow(&GlobalBackBuffer, DeviceContext, Dimension.Width, Dimension.Height);
-            EndPaint(Window,&Paint);
+            EndPaint(Window, &Paint);
         }break;
         
-        default:{
+        default: {
             Result = DefWindowProcA(Window, Message, WParam, LParam);
         }break;
     }
@@ -330,89 +404,6 @@ LRESULT CALLBACK Win32WindowProc(HWND Window,UINT Message,WPARAM WParam,
     return Result;
     
 }
-
-struct win32_sound_output
-{
-    int32 SamplesPerSecond;
-    int ToneHz;
-    int16 ToneVolume;
-    uint32 RunningSampleIndex;
-    int WavePeriod;
-    int HalfWavePeriod;
-    int BytesPerSample;
-    int SecondaryBufferSize;
-    int LatencySampleCount;
-    real32 tSine;
-};
-
-internal void Win32ClearSoundBuffer(win32_sound_output *SoundOutput)
-{
-    VOID *Region1;
-    DWORD Region1Size;
-    VOID *Region2;
-    DWORD Region2Size;
-    
-    if(SUCCEEDED(GlobalSecondaryBuffer->Lock(0, SoundOutput->SecondaryBufferSize,
-                                             &Region1, &Region1Size,
-                                             &Region2, &Region2Size,
-                                             0)))
-    {
-        uint8 *DestSample = (uint8*) Region1;
-        
-        for(DWORD ByteIndex = 0; ByteIndex < Region1Size; ++ByteIndex)
-        {
-            *DestSample++ = 0;
-        }
-        
-        DestSample = (uint8*) Region2;
-        
-        for(DWORD ByteIndex = 0; ByteIndex < Region2Size; ++ByteIndex)
-        {
-            *DestSample++ = 0;
-        }
-    }
-    
-    GlobalSecondaryBuffer->Unlock(Region1, Region1Size, Region2, Region2Size);
-}
-
-internal void Win32FillSoundBuffer(win32_sound_output *SoundOutput, game_sound_output_buffer *SourceBuffer, DWORD BytesToLock, DWORD BytesToWrite)
-{
-    VOID *Region1;
-    DWORD Region1Size;
-    VOID *Region2;
-    DWORD Region2Size;
-    
-    if(SUCCEEDED(GlobalSecondaryBuffer->Lock(BytesToLock,
-                                             BytesToWrite,
-                                             &Region1, &Region1Size,
-                                             &Region2, &Region2Size,
-                                             0))) 
-    {
-        DWORD Region1SampleCount = Region1Size / SoundOutput->BytesPerSample;
-        
-        int16 *DestSample = (int16 *)Region1;
-        int16 *SourceSample = SourceBuffer->Samples;
-        
-        for(int i = 0; i < Region1SampleCount; i++) {
-            *DestSample++ = *SourceSample++;
-            *DestSample++ = *SourceSample++;
-            ++SoundOutput->RunningSampleIndex;
-        }
-        
-        
-        DWORD Region2SampleCount = Region2Size / SoundOutput->BytesPerSample;
-        DestSample = (int16 *)Region2;
-        
-        for(int i = 0; i < Region2SampleCount; i++) {
-            *DestSample++ = *SourceSample++;
-            *DestSample++ = *SourceSample++;
-            ++SoundOutput->RunningSampleIndex;
-        }
-        
-        GlobalSecondaryBuffer->Unlock(Region1, Region1Size, Region2, Region2Size);
-    }
-}
-
 
 int CALLBACK WinMain(HINSTANCE Instance, HINSTANCE PrevInstance,
                      LPSTR CommandLine, int ShowCode)
@@ -467,9 +458,9 @@ int CALLBACK WinMain(HINSTANCE Instance, HINSTANCE PrevInstance,
             SoundOutput.SecondaryBufferSize = SoundOutput.SamplesPerSecond * SoundOutput.BytesPerSample;
             SoundOutput.LatencySampleCount = SoundOutput.SamplesPerSecond / 15;
             
-            Win32InitDirectSound(Window, SoundOutput.SamplesPerSecond, SoundOutput.SecondaryBufferSize);
+            Win32InitDSound(Window, SoundOutput.SamplesPerSecond, SoundOutput.SecondaryBufferSize);
             Win32ClearSoundBuffer(&SoundOutput);
-            GlobalSecondaryBuffer->Play(0, 0, DSBPLAY_LOOPING);
+            GlobalSoundBuffer->Play(0, 0, DSBPLAY_LOOPING);
             
             GlobalRunning = true;
             
@@ -534,7 +525,7 @@ int CALLBACK WinMain(HINSTANCE Instance, HINSTANCE PrevInstance,
                 DWORD PlayCursor;
                 DWORD WriteCursor;
                 
-                if(SUCCEEDED(GlobalSecondaryBuffer->GetCurrentPosition(&PlayCursor, &WriteCursor))) 
+                if(SUCCEEDED(GlobalSoundBuffer->GetCurrentPosition(&PlayCursor, &WriteCursor))) 
                 {
                     ByteToLock = SoundOutput.RunningSampleIndex * SoundOutput.BytesPerSample % SoundOutput.SecondaryBufferSize;
                     TargetCursor = (PlayCursor + SoundOutput.LatencySampleCount * SoundOutput.BytesPerSample) % SoundOutput.SecondaryBufferSize;
@@ -562,14 +553,14 @@ int CALLBACK WinMain(HINSTANCE Instance, HINSTANCE PrevInstance,
                 Buffer.Memory = GlobalBackBuffer.Memory;
                 Buffer.Width = GlobalBackBuffer.Width;
                 Buffer.Height = GlobalBackBuffer.Height;
-                Buffer.Pitch = GlobalBackBuffer.Pitch;
+                Buffer.BytesPerPixel = GlobalBackBuffer.Pitch;
                 
-                GameUpdateAndRender(&Buffer, &SoundBuffer, XOffset, YOffset, SoundOutput.ToneHz);
+                GameUpdateAndRender(&Buffer, XOffset, YOffset, &SoundBuffer, SoundOutput.ToneHz);
                 
                 // BUG: Probably player cursor out of buffer when pull out a window 
                 if (SoundIsValid)
                 {
-                    Win32FillSoundBuffer(&SoundOutput, &SoundBuffer, ByteToLock, BytesToWrite);
+                    Win32FillSoundBuffer(&SoundOutput, ByteToLock, BytesToWrite, &SoundBuffer);
                 }
                 
                 win32_window_dimension Dimension = Win32GetWindowDimension(Window);
@@ -610,6 +601,6 @@ int CALLBACK WinMain(HINSTANCE Instance, HINSTANCE PrevInstance,
     }
     
     return 0;
-} 
+}
 
 
