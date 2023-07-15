@@ -43,6 +43,7 @@ typedef double real64;
 #include "handmade.cpp"
 
 #include <windows.h>
+#include <malloc.h>
 #include <xinput.h>
 #include <dsound.h>
 
@@ -463,6 +464,8 @@ int CALLBACK WinMain(HINSTANCE Instance, HINSTANCE PrevInstance,
             
             GlobalRunning = true;
             
+            int16* Samples = (int16*)VirtualAlloc(0, SoundOutput.SecondaryBufferSize, MEM_COMMIT|MEM_RESERVE, PAGE_READWRITE);
+            
             LARGE_INTEGER LastCounter;
             QueryPerformanceCounter(&LastCounter);
             
@@ -542,7 +545,6 @@ int CALLBACK WinMain(HINSTANCE Instance, HINSTANCE PrevInstance,
                     SoundIsValid = true;
                 }
                 
-                int16 Samples[48000 * 2];
                 game_sound_output_buffer SoundBuffer = {};
                 SoundBuffer.SamplesPerSecond = SoundOutput.SamplesPerSecond;
                 SoundBuffer.SampleCount = BytesToWrite / SoundOutput.BytesPerSample;
