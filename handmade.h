@@ -1,6 +1,28 @@
 #if !defined(HANDMADE_H)
 // NOTE(voven): we need FOUR things: timing, controller/keyboadr input, bitmap buffer, sound buffer 
+
+/*
+  HANDMADE_INTERNAL:
+ 0 - Public release
+1 - Developer build
+
+HANDMADE_SLOW:
+0 - Not debuging
+1 - Debugging
+*/
+
+#if HANDMADE_SLOW
+#define Assert(Expression) if (!(Expression)) {*(int*)0 = 0;}
+#else
+#define Assert(Expression)
+#endif
+
 #define ArrayCount(Array) (sizeof(Array)/sizeof((Array)[0]))
+
+#define Kilobytes(Value) ((Value)*1024)
+#define Megabytes(Value) (Kilobytes(Value)*1024)
+#define Gigabytes(Value) (Megabytes(Value)*1024)
+#define Terabytes(Value) (Gigabytes(Value)*1024)
 
 struct game_sound_output_buffer
 {
@@ -55,12 +77,32 @@ struct game_controller_input
     };
 };
 
+struct game_memory
+{
+    bool32 IsInitialized;
+    uint64 PermanentStorageSize;
+    void *PermanentStorage;
+    void *TransientStorage;
+    uint64 TransientStorageSize;
+};
+
 struct game_input
 {
     game_controller_input Controllers[4];
 };
 
 internal void GameUpdateAndRender(game_input* Input,game_offscreen_buffer* Buffer,game_sound_output_buffer* SoundBuffer);
+
+//
+//
+//
+
+struct game_state
+{
+    int ToneHz;
+    int GreenOffset;
+    int BlueOffset;
+};
 
 #define HANDMADE_H
 #endif
