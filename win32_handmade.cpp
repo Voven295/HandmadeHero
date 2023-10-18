@@ -104,6 +104,88 @@ internal void Win32LoadXInput(void)
     }
 }
 
+internal debug_read_file_result DEBUGPlatformReadEntireFile(char *FileName)
+{
+    debug_read_file_result Result = {};
+    
+    HANDLE FileHandle = CreateFileA(FileName, GENERIC_READ, FILE_SHARE_READ, 0, OPEN_EXISTING, 0, 0);
+    if (FileHandle != INVALID_HANDLE_VALUE)
+    {
+        LARGE_INTEGER FileSize;
+        if (GetFileSizeEx(FileHandle, &FileSize))
+        {
+            uint32 FileSize32 = SafeTruncateUInt64(FileSize.QuadPart);
+            Result.Contents = VirtualAlloc(0, FileSize32, MEM_COMMIT|MEM_RESERVE, PAGE_READWRITE);
+            if (Result.Contents)
+            {
+                DWORD BytesRead = 0;
+                
+                if (ReadFile(FileHandle, Result.Contents, FileSize.QuadPart, &BytesRead, 0) && FileSize32 == BytesRead)
+                {
+                    Result.ContentsSize = FileSize32;
+                }
+                else
+                {
+                    DEBUGPlatformFreeFileMemory(Result.Contents);
+                    Result.Contents = 0; 
+                }
+            }
+            else 
+            {
+                
+            }
+        }
+        else 
+        {
+            
+        }
+    }
+    else 
+    {
+        
+    }
+    
+    CloseHandle(FileHandle);
+    
+    return(Result);
+}
+
+internal void DEBUGPlatformFreeFileMemory(void *Memory)
+{
+    if (Memory)
+    {
+        VirtualFree(Memory, 0, MEM_RELEASE);
+    }
+}
+
+internal bool32 DEBUGPlatformWriteEntireFile(char *FileName, uint32 MemorySize, void *Memory)
+{
+    bool32 Result = false;
+    
+    HANDLE FileHandle = CreateFileA(FileName, GENERIC_WRITE, 0, 0, CREATE_ALWAYS, 0, 0);
+    if (FileHandle != INVALID_HANDLE_VALUE)
+    {
+        DWORD BytesWritten = 0;
+        
+        if (WriteFile(FileHandle, Memory, MemorySize, &BytesWritten, 0))
+        {
+            Result = BytesWritten == MemorySize;
+        }
+        else
+        {
+            
+        }
+    }
+    else 
+    {
+        
+    }
+    
+    CloseHandle(FileHandle);
+    
+    return(Result);
+}
+
 internal void Win32InitDirectSound(HWND Window, int32 SamplesPerSecond, int32 BufferSize)
 {
     HMODULE DirectSoundLibrary = LoadLibraryA("dsound.dll");
@@ -441,7 +523,7 @@ int CALLBACK WinMain(HINSTANCE Instance, HINSTANCE PrevInstance,
             int16* Samples = (int16*)VirtualAlloc(0, SoundOutput.SecondaryBufferSize, MEM_COMMIT|MEM_RESERVE, PAGE_READWRITE);
             
 #if HANDMADE_INTERNAL
-            LPVOID BaseAddress = (LPVOID)Terabytes((uint64)2);
+            LPVOID BaseAddress = (LPVOID)Terabytes(2);
 #else
             LPVOID BaseAddress = 0;
 #endif
@@ -449,7 +531,7 @@ int CALLBACK WinMain(HINSTANCE Instance, HINSTANCE PrevInstance,
             game_memory GameMemory = {};
             
             GameMemory.PermanentStorageSize = Megabytes(64);
-            GameMemory.TransientStorageSize = Gigabytes((uint64)4);
+            GameMemory.TransientStorageSize = Gigabytes(4);
             
             uint64 TotalSize = GameMemory.PermanentStorageSize + GameMemory.TransientStorageSize;
             

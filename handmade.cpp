@@ -46,6 +46,18 @@ internal void GameUpdateAndRender(game_memory* Memory, game_input* Input, game_o
     
     if (!Memory->IsInitialized)
     {
+        char *FileName = __FILE__;
+        
+        debug_read_file_result File = DEBUGPlatformReadEntireFile(FileName);
+        
+        if (File.Contents)
+        {
+            //NOTE(voven): work directory in build folder
+            DEBUGPlatformWriteEntireFile("test.out", File.ContentsSize, File.Contents);
+            DEBUGPlatformFreeFileMemory(File.Contents);
+        }
+        
+        
         GameState->ToneHz = 256;
         Memory->IsInitialized = true;
     }
