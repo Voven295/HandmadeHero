@@ -16,7 +16,7 @@ internal void GameOutputSound(game_sound_output_buffer* SoundBuffer, int ToneHz)
         *SampleOut++ = SampleValue;
         *SampleOut++ = SampleValue;
         
-        tSine += 2.0f * Pi32 * (1.0f / (real32)WavePeriod);
+        tSine += 2.0f * (real32)Pi32 * (1.0f / (real32)WavePeriod);
     }
 }
 
@@ -28,8 +28,8 @@ internal void RenderWeirdGradeint(game_offscreen_buffer *Buffer, int XOffset, in
         uint32 *Pixel = (uint32 *)Row;
         
         for(int X = 0; X < Buffer->Width; X++) {
-            uint8 Blue = X + XOffset;
-            uint8 Green = Y + YOffset;
+            uint8 Blue = (uint8)(X + XOffset);
+            uint8 Green =(uint8)(Y + YOffset);
             // 0xXXRRGGBB
             *Pixel++ = (Green << 8) | Blue;
         }
@@ -66,7 +66,7 @@ internal void GameUpdateAndRender(game_memory* Memory, game_input* Input, game_o
     
     if (Input0->IsAnalog)
     {
-        GameState->BlueOffset += (int)4.0f*(Input0->EndX);
+        GameState->BlueOffset += (int)(4.0f*(Input0->EndX));
         GameState->ToneHz = 256 + (int)(128.0f*(Input0->EndY));
     }
     else
