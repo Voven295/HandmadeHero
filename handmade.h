@@ -67,31 +67,31 @@ struct game_button_state
 struct game_controller_input
 {
     bool32 IsAnalog;
-    
+    bool32 IsConnected;
     //TODO(voven): in future use vectors
-    real32 StartX;
-    real32 StartY;
-    
-    real32 MinX;
-    real32 MinY;
-    
-    real32 MaxX;
-    real32 MaxY;
-    
-    real32 EndX;
-    real32 EndY;
+    real32 StickAverageX;
+    real32 StickAverageY;
     
     union
     {
-        game_button_state Buttons[6];
+        game_button_state Buttons[12];
         struct
         {
-            game_button_state Up;
-            game_button_state Down;
-            game_button_state Left;
-            game_button_state Right;
+            game_button_state MoveUp;
+            game_button_state MoveDown;
+            game_button_state MoveLeft;
+            game_button_state MoveRight;
+            
+            game_button_state A;
+            game_button_state B;
+            game_button_state X;
+            game_button_state Y;
+            
             game_button_state LeftShoulder;
             game_button_state RightShoulder;
+            
+            game_button_state Back;
+            game_button_state Start;
         };
     };
 };
@@ -107,8 +107,16 @@ struct game_memory
 
 struct game_input
 {
-    game_controller_input Controllers[4];
+    //NOTE(voven): 4 gamepads and 1 keyboard
+    game_controller_input Controllers[5];
 };
+
+inline game_controller_input *GetController(game_input *Input, int ControllerIndex)
+{
+    Assert(ControllerIndex < ArrayCount(Input->Controllers));
+    game_controller_input *Result = &Input->Controllers[ControllerIndex];
+    return(Result);
+}
 
 internal void GameUpdateAndRender(game_input* Input,game_offscreen_buffer* Buffer,game_sound_output_buffer* SoundBuffer);
 
