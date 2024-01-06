@@ -39,7 +39,7 @@ internal void RenderWeirdGradeint(game_offscreen_buffer *Buffer, int XOffset, in
 }
 
 
-internal void GameUpdateAndRender(game_memory* Memory, game_input* Input, game_offscreen_buffer* Buffer, game_sound_output_buffer* SoundBuffer)
+internal void GameUpdateAndRender(game_memory* Memory, game_input* Input, game_offscreen_buffer* Buffer)
 {
     Assert(sizeof(game_state) <= Memory->PermanentStorageSize);
     Assert((&Input->Controllers[0].Start - &Input->Controllers[0].Buttons[0]) == (ArrayCount(Input->Controllers[0].Buttons)) - 1);
@@ -99,6 +99,11 @@ internal void GameUpdateAndRender(game_memory* Memory, game_input* Input, game_o
         }
     }
     
-    GameOutputSound(SoundBuffer, GameState->ToneHz);
     RenderWeirdGradeint(Buffer, GameState->BlueOffset, GameState->GreenOffset);
+}
+
+void GameGetSoundSamples(game_memory* Memory, game_sound_output_buffer* SoundBuffer)
+{
+    game_state *GameState = (game_state*)Memory->PermanentStorage;
+    GameOutputSound(SoundBuffer, GameState->ToneHz);
 }
