@@ -11,5 +11,6 @@ REM 32-bit build
 REM cl %CommonCompilerFlags%  ..\HandmadeHero\win32_handmade.cpp /link -subsystem:windows,5.1 %CommonLinkerFlags%
 
 REM 64-bit build
-cl %CommonCompilerFlags%  ..\HandmadeHero\win32_handmade.cpp /link %CommonLinkerFlags%
+cl %CommonCompilerFlags%  ..\HandmadeHero\handmade.cpp -Fm /LD /link /EXPORT:GameGetSoundSamples /EXPORT:GameUpdateAndRender
+cl %CommonCompilerFlags%  ..\HandmadeHero\win32_handmade.cpp -Fmwin32_handmade.map /link %CommonLinkerFlags%
 popd
