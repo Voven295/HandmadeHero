@@ -62,20 +62,31 @@ global_variable x_input_set_state* XInputSetState_ = XInputSetStateStub;
 #define DIRECT_SOUND_CREATE(name) HRESULT WINAPI name(LPCGUID pcGuidDevice, LPDIRECTSOUND *ppDS, LPUNKNOWN pUnkOuter);
 typedef DIRECT_SOUND_CREATE(direct_sound_create);
 
-struct win32_game_code
+inline FILETIME
+Win32GetLastWriteTime(char *Filename)
 {
-    HMODULE GameCodeDLL;
-    game_update_and_render *UpdateAndRender;
-    game_get_sound_samples *GetSoundSamples;
-    bool32 IsValid;
-};
+    FILETIME LastWriteTime = {};
+    
+    WIN32_FIND_DATA FindData;
+    HANDLE FindHandle = FindFirstFileA(Filename, &FindData);
+    if(FindHandle != INVALID_HANDLE_VALUE)
+    {
+        LastWriteTime = FindData.ftLastWriteTime;
+        FindClose(FindHandle);
+    }
+    
+    return(LastWriteTime);
+}
 
-internal win32_game_code Win32LoadGameCode(void)
+internal win32_game_code Win32LoadGameCode(char* SourceDLLName)
 {
     win32_game_code Result = {};
     
-    CopyFile("handmade.dll", "handmade_temp.dll", FALSE);
-    Result.GameCodeDLL = LoadLibrary("handmade_temp.dll");
+    char* TempDLLName = "handmade_temp.dll";
+    
+    Result.DLLLastWriteTime = Win32GetLastWriteTime(SourceDLLName);
+    CopyFile(SourceDLLName, TempDLLName, FALSE);
+    Result.GameCodeDLL = LoadLibrary(TempDLLName);
     
     if (Result.GameCodeDLL)
     {
@@ -745,7 +756,8 @@ int CALLBACK WinMain(HINSTANCE Instance, HINSTANCE PrevInstance,
                 real32 AudioLatencySeconds = 0;
                 bool32 SoundIsValid = false;
                 
-                win32_game_code Game = Win32LoadGameCode();
+                char* SourceDLLName = "handmade.dll";
+                win32_game_code Game = Win32LoadGameCode(SourceDLLName);
                 uint32 LoadCounter = 0;
                 
                 //NOTE(voven): only for profiling, not for test on user machine
@@ -753,10 +765,12 @@ int CALLBACK WinMain(HINSTANCE Instance, HINSTANCE PrevInstance,
                 
                 while(GlobalRunning)
                 {
-                    if(LoadCounter++ > 120)
+                    FILETIME NewDLLWriteTime = Win32GetLastWriteTime(SourceDLLName);
+                    
+                    if(CompareFileTime(&NewDLLWriteTime, &Game.DLLLastWriteTime) != 0)
                     {
                         Win32UnloadGameCode(&Game);
-                        Game = Win32LoadGameCode();
+                        Game = Win32LoadGameCode(SourceDLLName);
                         LoadCounter = 0;
                     }
                     
