@@ -36,6 +36,35 @@ void RenderWeirdGradeint(game_offscreen_buffer *Buffer, int XOffset, int YOffset
     }
 }
 
+internal void
+RenderPlayer(game_offscreen_buffer *Buffer, int PlayerX, int PlayerY)
+{
+    uint8 *EndOfBuffer = (uint8 *)Buffer->Memory + Buffer->Pitch*Buffer->Height;
+    
+    uint32 Color = 0xFFFFFFFF;
+    int Top = PlayerY;
+    int Bottom = PlayerY+10;
+    for(int X = PlayerX;
+        X < PlayerX+10;
+        ++X)
+    {
+        uint8 *Pixel = ((uint8 *)Buffer->Memory +
+                        X*Buffer->BytesPerPixel +
+                        Top*Buffer->Pitch);
+        for(int Y = Top;
+            Y < Bottom;
+            ++Y)
+        {
+            if((Pixel >= Buffer->Memory) &&
+               ((Pixel + 4) <= EndOfBuffer))
+            {
+                *(uint32 *)Pixel = Color;
+            }
+            
+            Pixel += Buffer->Pitch;
+        }
+    }
+}
 
 extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
 {
@@ -59,6 +88,10 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
         
         GameState->ToneHz = 256;
         GameState->tSine = 0.0f;
+        
+        GameState->PlayerX = 100;
+        GameState->PlayerY = 100;
+        
         Memory->IsInitialized = true;
     }
     
@@ -95,9 +128,22 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
                 GameState->GreenOffset += 1;
             }
         }
+        
+        GameState->PlayerX += (int)(4.0f*Controller->StickAverageX);
+        GameState->PlayerY -= (int)(4.0f*Controller->StickAverageY);
+        if(GameState->tJump > 0)
+        {
+            GameState->PlayerY += (int)(5.0f * sinf(0.5f*(float)Pi32*GameState->tJump));
+        }
+        if(Controller->A.EndedDown)
+        {
+            GameState->tJump = 4.0;
+        }
+        GameState->tJump -= 0.033f;
     }
     
     RenderWeirdGradeint(Buffer, GameState->BlueOffset, GameState->GreenOffset);
+    RenderPlayer(Buffer, GameState->PlayerX, GameState->PlayerY);
 }
 
 extern "C" GAME_GET_SOUND_SAMPLES(GameGetSoundSamples)

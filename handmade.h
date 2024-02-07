@@ -83,6 +83,7 @@ struct game_offscreen_buffer
 {
     void *Memory;
     int BytesPerPixel;
+    int Pitch;
     int Width;
     int Height;
 };
@@ -166,10 +167,6 @@ GAME_GET_SOUND_SAMPLES(GameGetSoundSamplesStub)
 extern "C" void GameUpdateAndRender(game_memory* Memory, game_input* Input, game_offscreen_buffer* Buffer);
 extern "C" void GameGetSoundSamples(game_memory* Memory, game_sound_output_buffer* SoundBuffer);
 
-//
-//
-//
-
 struct game_state
 {
     int ToneHz;
@@ -177,6 +174,10 @@ struct game_state
     int BlueOffset;
     
     real32 tSine;
+    
+    int PlayerX;
+    int PlayerY;
+    real32 tJump;
 };
 
 #define HANDMADE_H
